@@ -350,6 +350,28 @@ input[type="text"]::placeholder { color:#bcc3ce; }
       <div id="top-zones-list">
         <p style="color:#bcc3ce;font-size:13px;line-height:1.5;">Aucun point pour l'instant.<br>Ajoutez le premier ! 🥤</p>
       </div>
+
+      <!-- BOUTON RESET -->
+      <div style="margin-top:24px;padding-top:16px;border-top:1px solid #edf0f5;">
+        <button onclick="resetStep1()" id="reset-btn" style="width:100%;padding:10px;background:#c8102e;color:white;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;">
+          🗑️ Supprimer tous les points
+        </button>
+        <div id="reset-confirm" style="display:none;margin-top:8px;background:#fff3f3;border:1px solid #ffcccc;border-radius:7px;padding:10px;text-align:center;">
+          <div style="font-size:13px;font-weight:600;color:#c8102e;margin-bottom:8px;">T'es certain(e) ? Tous les points seront supprimés 😱</div>
+          <div style="display:flex;gap:8px;">
+            <button onclick="resetStep2()" style="flex:1;padding:8px;background:#c8102e;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">Oui je suis certain(e)</button>
+            <button onclick="cancelReset()" style="flex:1;padding:8px;background:#edf0f5;color:#555;border:none;border-radius:6px;cursor:pointer;">Annuler</button>
+          </div>
+        </div>
+        <div id="reset-confirm2" style="display:none;margin-top:8px;background:#fff0f0;border:1px solid #ffaaaa;border-radius:7px;padding:10px;text-align:center;">
+          <div style="font-size:13px;font-weight:600;color:#c8102e;margin-bottom:4px;">T'es VRAIMENT certain(e) ? 🚨</div>
+          <div style="font-size:12px;color:#888;margin-bottom:8px;">Cette action est irréversible pour toute la team !</div>
+          <div style="display:flex;gap:8px;">
+            <button onclick="resetConfirmed()" style="flex:1;padding:8px;background:#c8102e;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">OUI SUPPRIMER TOUT</button>
+            <button onclick="cancelReset()" style="flex:1;padding:8px;background:#edf0f5;color:#555;border:none;border-radius:6px;cursor:pointer;">Annuler</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -414,11 +436,14 @@ function selectOcc(occ) {
 
 // ── GEOCODE — plusieurs tentatives pour ne jamais échouer ──
 async function geocode(query) {
-  const url = q => `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=3&countrycodes=fr&addressdetails=1`;
+  const url = q => `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5&countrycodes=fr&addressdetails=1`;
   const hdr = { 'Accept-Language':'fr', 'User-Agent':'RedBullTeamRouen/1.0' };
 
-  // Tentative 1 : requête complète
+  // Tentative 1 : requête complète avec lieu + adresse
   let res = await fetch(url(query), {headers:hdr}).then(r=>r.json()).catch(()=>[]);
+  // Prioriser les résultats de type lieu (amenity, tourism, leisure, shop) plutôt que les rues
+  const preferred = res.find(r => ['amenity','tourism','leisure','shop','place','historic','building'].includes(r.type) || ['amenity','tourism','leisure','shop','place','historic'].includes(r.class));
+  if (preferred) return parseGeo(preferred);
   if (res.length) return parseGeo(res[0]);
 
   // Tentative 2 : juste l'adresse sans le nom du lieu
@@ -428,7 +453,7 @@ async function geocode(query) {
     if (res.length) return parseGeo(res[0]);
   }
 
-  // Tentative 3 : on garde uniquement la ville (dernier mot avant "France")
+  // Tentative 3 : ville seule
   const parts = query.split(',').map(s=>s.trim()).filter(s=>s && s!=='France');
   for (let i = parts.length - 1; i >= 0; i--) {
     const attempt = parts[i] + ', France';
@@ -619,6 +644,34 @@ function searchLieu() {
 function focusPoint(id) {
   const p = allPoints.find(x=>x.id===id);
   if(p){ map.setView([p.lat,p.lng],15); markers[id]?.openPopup(); }
+}
+
+function resetStep1() {
+  document.getElementById('reset-confirm').style.display='block';
+  document.getElementById('reset-confirm2').style.display='none';
+}
+function resetStep2() {
+  document.getElementById('reset-confirm').style.display='none';
+  document.getElementById('reset-confirm2').style.display='block';
+}
+function cancelReset() {
+  document.getElementById('reset-confirm').style.display='none';
+  document.getElementById('reset-confirm2').style.display='none';
+}
+async function resetConfirmed() {
+  if (!db) return;
+  cancelReset();
+  showStatus('🗑️ Suppression en cours…', 'loading');
+  try {
+    const snap = await db.collection('points').get();
+    const batch = db.batch();
+    snap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+    showStatus('✅ Tous les points supprimés.', 'success');
+    setTimeout(hideStatus, 3000);
+  } catch(e) {
+    showStatus('❌ Erreur : '+e.message, 'error');
+  }
 }
 
 // ── FIREBASE ──
