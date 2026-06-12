@@ -289,7 +289,19 @@ input[type="text"]::placeholder { color:#bcc3ce; }
 <div class="main">
   <div class="sidebar">
     <div class="sidebar-section">
-      <h3>➕ Ajouter un endroit</h3>
+      <!-- BARRE DE RECHERCHE -->
+      <h3>🔍 Chercher un endroit déjà visité</h3>
+      <div class="field-hint" style="margin-bottom:8px;">Tape le nom d'un lieu ou d'une ville pour retrouver un point sur la carte</div>
+      <div style="display:flex;gap:6px;margin-bottom:6px;">
+        <input type="text" id="input-search" placeholder="Ex : Fitness Park, Rouen…" style="flex:1;margin-bottom:0;"/>
+        <button onclick="searchLieu()" style="padding:9px 12px;background:#003f8a;color:white;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:bold;">→</button>
+      </div>
+      <div id="search-results" style="margin-bottom:4px;"></div>
+
+      <div style="border-top:2px solid #003f8a;margin:14px 0 14px;"></div>
+
+      <h3>➕ Ajouter un nouveau lieu</h3>
+      <div class="field-hint" style="margin-bottom:10px;">Remplis les champs ci-dessous pour ajouter un endroit où la team a sampé</div>
 
       <div class="field-label">Nom du lieu</div>
       <div class="field-hint">Ex : Fitness Park, Vieux-Marché, Neoma BS…</div>
@@ -298,6 +310,10 @@ input[type="text"]::placeholder { color:#bcc3ce; }
       <div class="field-label">Adresse ou ville</div>
       <div class="field-hint">Copie-colle depuis Google Maps ou tape le nom de la ville</div>
       <input type="text" id="input-adresse" placeholder="Place Saint-Marc, Rouen"/>
+
+      <div class="field-label">Date de la visite</div>
+      <div class="field-hint">Quand avez-vous sampé ici ?</div>
+      <input type="date" id="input-date" style="width:100%;background:#f7f9fc;border:1.5px solid #dde3ec;color:#1a1a2e;padding:9px 11px;border-radius:7px;font-size:13px;outline:none;margin-bottom:10px;"/>
 
       <div class="field-label" style="margin-bottom:8px;">Occasion de conso</div>
       <div class="occasion-grid">
@@ -314,6 +330,20 @@ input[type="text"]::placeholder { color:#bcc3ce; }
       <div class="status-msg" id="status-msg"></div>
     </div>
 
+    <!-- LÉGENDE -->
+    <div style="padding:12px 16px 0;border-top:1px solid #edf0f5;">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#8a94a6;margin-bottom:8px;">Légende des couleurs</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12px;">
+        <div style="display:flex;align-items:center;gap:6px;"><span style="width:12px;height:12px;border-radius:2px;background:#1565c0;display:inline-block;"></span>⚡ Work</div>
+        <div style="display:flex;align-items:center;gap:6px;"><span style="width:12px;height:12px;border-radius:2px;background:#c8102e;display:inline-block;"></span>🏋️ Sport</div>
+        <div style="display:flex;align-items:center;gap:6px;"><span style="width:12px;height:12px;border-radius:2px;background:#f9a825;display:inline-block;"></span>🏎️ Drive</div>
+        <div style="display:flex;align-items:center;gap:6px;"><span style="width:12px;height:12px;border-radius:2px;background:#7b1fa2;display:inline-block;"></span>🎉 Party</div>
+        <div style="display:flex;align-items:center;gap:6px;"><span style="width:12px;height:12px;border-radius:2px;background:#e91e8c;display:inline-block;"></span>📚 Study</div>
+        <div style="display:flex;align-items:center;gap:6px;"><span style="width:12px;height:12px;border-radius:2px;background:#212121;display:inline-block;"></span>🎮 Gaming</div>
+        <div style="display:flex;align-items:center;gap:6px;"><span style="width:12px;height:12px;border-radius:2px;background:#e65100;display:inline-block;"></span>📍 Autre</div>
+      </div>
+    </div>
+
     <div class="top-zones">
       <h3>🏆 Zones les plus touchées</h3>
       <div class="top-zones-sub">Classées par ville, nombre de passages</div>
@@ -327,11 +357,16 @@ input[type="text"]::placeholder { color:#bcc3ce; }
 </div>
 
 <script>
-let db = null, selectedOcc = null, allPoints = [], markers = {};
+let db = null, selectedOccs = [], allPoints = [], markers = {};
 
 const OCC_COLORS = {
-  Work:'#c8102e', Sport:'#1565c0', Study:'#6a1b9a',
-  Party:'#e65100', Drive:'#00838f', Gaming:'#4527a0', Other:'#546e7a'
+  Work:'#1565c0',    // bleu foncé
+  Sport:'#c8102e',   // rouge
+  Drive:'#f9a825',   // jaune
+  Party:'#7b1fa2',   // violet
+  Study:'#e91e8c',   // rose
+  Gaming:'#212121',  // noir
+  Other:'#e65100'    // orange
 };
 
 // ── MAP ──
@@ -341,12 +376,19 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 }).addTo(map);
 
 // ── CANETTE ──
-function canIcon(color) {
+function canIcon(color, color2) {
+  const gid = 'g'+color.slice(1)+(color2?color2.slice(1):'');
+  const gradDef = color2
+    ? `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="0"><stop offset="50%" stop-color="${color}"/><stop offset="50%" stop-color="${color2}"/></linearGradient></defs>`
+    : '';
+  const fill = color2 ? `url(#${gid})` : color;
+  const ellipseFill = color2 ? color : color;
   return L.divIcon({
     className:'',
     html:`<svg width="24" height="40" viewBox="0 0 24 40" xmlns="http://www.w3.org/2000/svg">
-      <ellipse cx="12" cy="6" rx="8" ry="2.5" fill="${color}"/>
-      <rect x="4" y="6" width="16" height="22" fill="${color}"/>
+      ${gradDef}
+      <ellipse cx="12" cy="6" rx="8" ry="2.5" fill="${ellipseFill}"/>
+      <rect x="4" y="6" width="16" height="22" fill="${fill}"/>
       <ellipse cx="12" cy="28" rx="8" ry="2.5" fill="${dk(color)}"/>
       <rect x="5" y="7" width="6" height="20" fill="rgba(255,255,255,0.13)" rx="2"/>
       <text x="12" y="19" text-anchor="middle" font-family="Arial Black" font-size="4.5" font-weight="900" fill="white">RED</text>
@@ -365,9 +407,9 @@ function dk(hex) {
 
 // ── OCCASION ──
 function selectOcc(occ) {
-  selectedOcc = occ;
-  document.querySelectorAll('.occ-btn').forEach(b=>b.classList.remove('active'));
-  document.getElementById('occ-'+occ).classList.add('active');
+  const idx = selectedOccs.indexOf(occ);
+  if (idx === -1) { selectedOccs.push(occ); document.getElementById('occ-'+occ).classList.add('active'); }
+  else { selectedOccs.splice(idx,1); document.getElementById('occ-'+occ).classList.remove('active'); }
 }
 
 // ── GEOCODE — plusieurs tentatives pour ne jamais échouer ──
@@ -417,10 +459,12 @@ function parseGeo(item) {
 async function addPoint() {
   const lieu    = document.getElementById('input-lieu').value.trim();
   const adresse = document.getElementById('input-adresse').value.trim();
+  const dateVal = document.getElementById('input-date').value;
 
   if (!lieu)        return showStatus('✏️ Donne un nom au lieu (ex: Fitness Park).', 'error');
   if (!adresse)     return showStatus('📍 Rentre une adresse ou une ville.', 'error');
-  if (!selectedOcc) return showStatus('🎯 Choisis une occasion de consommation.', 'error');
+  if (!dateVal)     return showStatus('📅 Choisis une date de visite.', 'error');
+  if (!selectedOccs.length) return showStatus('🎯 Choisis au moins une occasion de consommation.', 'error');
   if (!db)          return showStatus('🔌 Firebase pas encore connecté.', 'error');
 
   document.getElementById('add-btn').disabled = true;
@@ -433,21 +477,34 @@ async function addPoint() {
     return showStatus('❌ Impossible de localiser. Essaie avec juste le nom de la ville.', 'error');
   }
 
-  const now = new Date();
+  // Formater la date choisie en français
+  const d = new Date(dateVal + 'T12:00:00');
+  const dateFormatted = d.toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
+
   const point = {
     lieu, adresse,
     ville: geo.ville,
-    occasion: selectedOcc,
+    occasion: selectedOccs.join(','),
     lat: geo.lat, lng: geo.lng,
-    date: now.toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'}),
-    timestamp: Date.now()
+    date: dateFormatted,
+    timestamp: d.getTime()
   };
 
   try {
-    await db.collection('points').add(point);
+    // Cherche si ce lieu existe déjà (même nom, insensible à la casse)
+    const existing = allPoints.find(p => p.lieu.toLowerCase() === lieu.toLowerCase());
+    if (existing) {
+      await db.collection('points').doc(existing.id).update(point);
+      showStatus('🔄 Lieu mis à jour !', 'success');
+    } else {
+      await db.collection('points').add(point);
+      showStatus('🥤 Point ajouté !', 'success');
+    }
     document.getElementById('input-lieu').value = '';
     document.getElementById('input-adresse').value = '';
-    showStatus('🥤 Point ajouté !', 'success');
+    document.getElementById('input-date').value = '';
+    selectedOccs = [];
+    document.querySelectorAll('.occ-btn').forEach(b=>b.classList.remove('active'));
     setTimeout(hideStatus, 3000);
   } catch(e) {
     showStatus('❌ Erreur : '+e.message, 'error');
@@ -468,13 +525,15 @@ function renderPoints(points) {
   markers = {};
 
   points.forEach(p => {
-    const color = OCC_COLORS[p.occasion] || '#546e7a';
-    const m = L.marker([p.lat,p.lng],{icon:canIcon(color)}).addTo(map);
+    const occs = (p.occasion||'').split(',');
+    const color = OCC_COLORS[occs[0]] || '#546e7a';
+    const color2 = occs[1] ? (OCC_COLORS[occs[1]] || null) : null;
+    const m = L.marker([p.lat,p.lng],{icon:canIcon(color, color2)}).addTo(map);
     m.bindPopup(`
       <div class="popup-inner">
         <div class="popup-lieu">${esc(p.lieu)}</div>
         <div class="popup-ville">📍 ${esc(p.ville||p.adresse)}</div>
-        <span class="popup-occ">${occEmoji(p.occasion)} ${p.occasion}</span>
+        <span class="popup-occ">${(p.occasion||'').split(',').map(o=>occEmoji(o)+' '+o).join(' · ')}</span>
         <div class="popup-date">🗓️ Visité le ${p.date}</div>
         <hr class="popup-sep"/>
         <button class="popup-delete" onclick="confirmDelete('${p.id}','${esc(p.lieu)}')">🗑️ Supprimer ce point</button>
@@ -537,6 +596,31 @@ function focusVille(ville) {
   if(p){map.setView([p.lat,p.lng],13); markers[p.id]?.openPopup();}
 }
 
+// ── RECHERCHE ──
+function searchLieu() {
+  const q = document.getElementById('input-search').value.trim().toLowerCase();
+  const res = document.getElementById('search-results');
+  if (!q) { res.innerHTML=''; return; }
+  const found = allPoints.filter(p =>
+    (p.lieu||'').toLowerCase().includes(q) ||
+    (p.ville||'').toLowerCase().includes(q) ||
+    (p.adresse||'').toLowerCase().includes(q)
+  );
+  if (!found.length) {
+    res.innerHTML='<div style="color:#aaa;font-size:12px;padding:4px 0;">Aucun résultat</div>';
+    return;
+  }
+  res.innerHTML = found.slice(0,5).map(p=>`
+    <div onclick="focusPoint('${p.id}')" style="cursor:pointer;padding:6px 8px;border-radius:6px;background:#f7f9fc;margin-bottom:4px;font-size:12px;border:1px solid #edf0f5;">
+      <strong>${p.lieu}</strong><br>
+      <span style="color:#8a94a6;">📍 ${p.ville||p.adresse} · ${(p.occasion||'').split(',').map(o=>occEmoji(o)).join('')} · 🗓️ ${p.date}</span>
+    </div>`).join('');
+}
+function focusPoint(id) {
+  const p = allPoints.find(x=>x.id===id);
+  if(p){ map.setView([p.lat,p.lng],15); markers[id]?.openPopup(); }
+}
+
 // ── FIREBASE ──
 function saveConfig() {
   const cfg = {
@@ -588,6 +672,9 @@ window.addEventListener('load', ()=>{
   initFirebase(cfg);
   document.getElementById('input-adresse').addEventListener('keydown', e=>{
     if(e.key==='Enter') addPoint();
+  });
+  document.getElementById('input-search').addEventListener('keydown', e=>{
+    if(e.key==='Enter') searchLieu();
   });
 });
 </script>
