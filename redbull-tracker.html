@@ -215,6 +215,37 @@ input[type="text"]::placeholder { color:#bcc3ce; }
 </head>
 <body>
 
+
+<!-- MODAL EDITION -->
+<div class="modal-overlay" id="editModal" style="display:none">
+  <div class="modal" style="max-height:90vh;overflow-y:auto;">
+    <div class="modal-header">
+      <div class="modal-title"><h2>✏️ Modifier ce point</h2><p>Modifie les infos puis sauvegarde</p></div>
+    </div>
+    <input type="hidden" id="edit-id"/>
+    <label>Nom du lieu</label>
+    <input type="text" id="edit-lieu" placeholder="Fitness Park Rouen"/>
+    <label>Adresse ou ville</label>
+    <input type="text" id="edit-adresse" placeholder="Place Saint-Marc, Rouen"/>
+    <label>Date de la visite</label>
+    <input type="date" id="edit-date" style="width:100%;background:#f7f9fc;border:1.5px solid #dde3ec;color:#1a1a2e;padding:9px 12px;border-radius:7px;font-size:13px;margin-top:4px;"/>
+    <label style="margin-top:14px;">Occasion(s) de conso</label>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;" id="edit-occs">
+      <button class="occ-btn" onclick="toggleEditOcc(this,'Work')">⚡ Work</button>
+      <button class="occ-btn" onclick="toggleEditOcc(this,'Sport')">🏋️ Sport</button>
+      <button class="occ-btn" onclick="toggleEditOcc(this,'Study')">📚 Study</button>
+      <button class="occ-btn" onclick="toggleEditOcc(this,'Party')">🎉 Party</button>
+      <button class="occ-btn" onclick="toggleEditOcc(this,'Drive')">🏎️ Drive</button>
+      <button class="occ-btn" onclick="toggleEditOcc(this,'Gaming')">🎮 Gaming</button>
+      <button class="occ-btn" onclick="toggleEditOcc(this,'Other')">📍 Autre</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:20px;">
+      <button class="modal-btn" onclick="saveEdit()" style="flex:1;">💾 Sauvegarder</button>
+      <button onclick="closeEditModal()" style="flex:1;padding:12px;background:#edf0f5;color:#555;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">Annuler</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL -->
 <div class="modal-overlay" id="configModal" style="display:none">
   <div class="modal">
@@ -259,11 +290,27 @@ input[type="text"]::placeholder { color:#bcc3ce; }
     <h1>Carte des Zones — Team Rouen</h1>
     <p>Tous les endroits touchés, en temps réel</p>
   </div>
-  <div class="header-sync">
-    <div class="sync-dot"></div>
-    <span class="sync-label">Synchronisé</span>
+  <div class="header-sync" style="gap:10px;">
+    <div style="display:flex;align-items:center;gap:6px;">
+      <div class="sync-dot"></div>
+      <span class="sync-label">Synchronisé</span>
+    </div>
+    <button onclick="toggleHistorique()" title="Historique des ajouts" style="background:rgba(255,255,255,0.15);border:none;color:white;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;">📋 Historique</button>
   </div>
 </header>
+<!-- PANEL HISTORIQUE -->
+<div id="historique-panel" style="display:none;position:fixed;top:64px;right:0;width:320px;max-height:60vh;background:white;border-left:2px solid #dde3ec;border-bottom:2px solid #dde3ec;border-bottom-left-radius:10px;z-index:9000;overflow-y:auto;box-shadow:-4px 4px 20px rgba(0,0,0,.15);">
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #edf0f5;position:sticky;top:0;background:white;">
+    <span style="font-size:13px;font-weight:700;color:#1a1a2e;">📋 Historique des ajouts</span>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button onclick="clearHistorique()" style="font-size:11px;color:#c8102e;background:none;border:none;cursor:pointer;padding:0;">🗑️ Vider</button>
+      <button onclick="toggleHistorique()" style="font-size:18px;background:none;border:none;cursor:pointer;color:#555;line-height:1;">×</button>
+    </div>
+  </div>
+  <div id="historique-list" style="padding:8px 12px;">
+    <p style="color:#bcc3ce;font-size:12px;">Aucune action pour l'instant.</p>
+  </div>
+</div>
 
 <!-- STATS -->
 <div class="stats-bar">
@@ -276,11 +323,18 @@ input[type="text"]::placeholder { color:#bcc3ce; }
     <div class="stat-value" id="stat-total">0</div>
   </div>
   <div class="stat">
-    <div class="stat-label">Ville la + touchée</div>
+    <div class="stat-label" style="display:flex;align-items:center;gap:6px;">
+      Zones touchées
+      <select id="period-select" onchange="updateTopZones(allPoints)" style="font-size:10px;border:none;background:transparent;color:#8a94a6;cursor:pointer;padding:0;">
+        <option value="week">cette semaine</option>
+        <option value="month" selected>ce mois</option>
+        <option value="all">tout</option>
+      </select>
+    </div>
     <div class="stat-value" id="stat-top">—</div>
   </div>
   <div class="stat">
-    <div class="stat-label">Occasion principale</div>
+    <div class="stat-label">Occasion principale (mois)</div>
     <div class="stat-value" id="stat-occ">—</div>
   </div>
 </div>
@@ -521,9 +575,13 @@ async function addPoint() {
     if (existing) {
       await db.collection('points').doc(existing.id).update(point);
       showStatus('🔄 Lieu mis à jour !', 'success');
+      addHistorique(`🔄 Mise à jour : ${lieu} (${geo.ville})`);
+      map.flyTo([point.lat, point.lng], 15, {animate:true, duration:1.2});
     } else {
       await db.collection('points').add(point);
       showStatus('🥤 Point ajouté !', 'success');
+      addHistorique(`🥤 Ajout : ${lieu} (${geo.ville})`);
+      map.flyTo([point.lat, point.lng], 15, {animate:true, duration:1.2});
     }
     document.getElementById('input-lieu').value = '';
     document.getElementById('input-adresse').value = '';
@@ -561,7 +619,10 @@ function renderPoints(points) {
         <span class="popup-occ">${(p.occasion||'').split(',').map(o=>occEmoji(o)+' '+o).join(' · ')}</span>
         <div class="popup-date">🗓️ Visité le ${p.date}</div>
         <hr class="popup-sep"/>
-        <button class="popup-delete" onclick="confirmDelete('${p.id}','${esc(p.lieu)}')">🗑️ Supprimer ce point</button>
+        <div style="display:flex;gap:6px;">
+          <button class="popup-delete" style="flex:1;" onclick="openEditModal('${p.id}')">✏️ Modifier</button>
+          <button class="popup-delete" style="flex:1;color:#c8102e;" onclick="confirmDelete('${p.id}','${esc(p.lieu)}')">🗑️ Supprimer</button>
+        </div>
       </div>`);
     markers[p.id] = m;
   });
@@ -575,7 +636,7 @@ function esc(s) { return String(s||'').replace(/'/g,"\\'").replace(/"/g,'&quot;'
 
 function confirmDelete(id, lieu) {
   if (confirm(`🗑️ Supprimer le point "${lieu}" ?\n\nCette action est irréversible.`)) {
-    db.collection('points').doc(id).delete();
+    db.collection('points').doc(id).delete().then(()=>addHistorique(`🗑️ Supprimé : ${lieu}`));
   }
 }
 
@@ -589,26 +650,59 @@ function updateStats(points) {
   const sorted = [...points].sort((a,b)=>b.timestamp-a.timestamp);
   document.getElementById('stat-last').textContent = sorted[0].lieu;
 
-  const vc={};
-  points.forEach(p=>{ const v=p.ville||'?'; vc[v]=(vc[v]||0)+1; });
-  const tv=Object.entries(vc).sort((a,b)=>b[1]-a[1])[0];
-  document.getElementById('stat-top').textContent = tv?`${tv[0]} (${tv[1]}x)`:'—';
-
-  const oc={};
-  points.forEach(p=>{ oc[p.occasion]=(oc[p.occasion]||0)+1; });
-  const to=Object.entries(oc).sort((a,b)=>b[1]-a[1])[0];
-  document.getElementById('stat-occ').textContent = to?`${occEmoji(to[0])} ${to[0]}`:'—';
+  // Occasion principale : mois en cours uniquement
+  const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0,0,0,0);
+  const thisMo = points.filter(p=>(p.timestamp||0)>=monthStart.getTime());
+  if (thisMo.length) {
+    const oc={};
+    thisMo.forEach(p=>{ (p.occasion||'').split(',').forEach(o=>{ oc[o]=(oc[o]||0)+1; }); });
+    const total = Object.values(oc).reduce((a,b)=>a+b,0);
+    const to=Object.entries(oc).sort((a,b)=>b[1]-a[1])[0];
+    const pct = Math.round(to[1]/total*100);
+    document.getElementById('stat-occ').textContent = to?`${occEmoji(to[0])} ${to[0]} (${pct}%)`:'—';
+  } else {
+    document.getElementById('stat-occ').textContent = '— (pas de pts ce mois)';
+  }
 }
 
 // ── TOP ZONES ──
+function getPeriodStart(period) {
+  const now = new Date();
+  if (period === 'week') {
+    const d = new Date(now);
+    d.setHours(0,0,0,0);
+    d.setDate(d.getDate() - d.getDay() + (d.getDay()===0?-6:1)); // lundi
+    return d.getTime();
+  }
+  if (period === 'month') {
+    return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  }
+  return 0;
+}
+
 function updateTopZones(points) {
+  const periodSel = document.getElementById('period-select');
+  const period = periodSel ? periodSel.value : 'month';
+  const since = getPeriodStart(period);
+
+  const filtered = since > 0 ? points.filter(p => (p.timestamp||0) >= since) : points;
+
   const vc={};
-  points.forEach(p=>{ const v=p.ville||'?'; vc[v]=(vc[v]||0)+1; });
+  filtered.forEach(p=>{ const v=p.ville||'?'; vc[v]=(vc[v]||0)+1; });
   const sorted=Object.entries(vc).sort((a,b)=>b[1]-a[1]).slice(0,15);
+
+  // Mettre à jour stat-top
+  const tv = sorted[0];
+  document.getElementById('stat-top').textContent = tv ? `${tv[0]} (${tv[1]}x)` : '—';
+
   const c=document.getElementById('top-zones-list');
-  if (!sorted.length) { c.innerHTML='<p style="color:#bcc3ce;font-size:13px;line-height:1.5;">Aucun point pour l\'instant.<br>Ajoutez le premier ! 🥤</p>'; return; }
+  if (!sorted.length) {
+    c.innerHTML='<p style="color:#bcc3ce;font-size:13px;line-height:1.5;">Aucun point sur cette période.<br>Changez le filtre ou ajoutez des points ! 🥤</p>';
+    return;
+  }
   const medals=['🥇','🥈','🥉'];
-  c.innerHTML=sorted.map(([v,n],i)=>`
+  const labels = {week:'cette semaine', month:'ce mois', all:'au total'};
+  c.innerHTML=`<div style="font-size:11px;color:#8a94a6;margin-bottom:8px;">${labels[period] || ''} · ${filtered.length} point${filtered.length>1?'s':''}</div>`+sorted.map(([v,n],i)=>`
     <div class="zone-item" onclick="focusVille('${esc(v)}')">
       <span class="zone-rank">${medals[i]||(i+1)}</span>
       <span class="zone-name">${v}</span>
@@ -646,6 +740,101 @@ function focusPoint(id) {
   if(p){ map.setView([p.lat,p.lng],15); markers[id]?.openPopup(); }
 }
 
+// ── EDITION ──
+function openEditModal(id) {
+  const p = allPoints.find(x=>x.id===id);
+  if (!p) return;
+  map.closePopup();
+  document.getElementById('edit-id').value = id;
+  document.getElementById('edit-lieu').value = p.lieu||'';
+  document.getElementById('edit-adresse').value = p.adresse||'';
+  // Remettre la date
+  if (p.timestamp) {
+    const d = new Date(p.timestamp);
+    document.getElementById('edit-date').value = d.toISOString().slice(0,10);
+  } else {
+    document.getElementById('edit-date').value = '';
+  }
+  // Remettre les occasions cochées
+  const occs = (p.occasion||'').split(',');
+  document.querySelectorAll('#edit-occs .occ-btn').forEach(b=>{
+    const occ = b.getAttribute('onclick').match(/'([^']+)'\)/)?.[1];
+    b.classList.toggle('active', occs.includes(occ));
+  });
+  document.getElementById('editModal').style.display='flex';
+}
+function closeEditModal() {
+  document.getElementById('editModal').style.display='none';
+}
+function toggleEditOcc(btn, occ) {
+  btn.classList.toggle('active');
+}
+async function saveEdit() {
+  const id      = document.getElementById('edit-id').value;
+  const lieu    = document.getElementById('edit-lieu').value.trim();
+  const adresse = document.getElementById('edit-adresse').value.trim();
+  const dateVal = document.getElementById('edit-date').value;
+  const selBtns = document.querySelectorAll('#edit-occs .occ-btn.active');
+  const occs    = Array.from(selBtns).map(b=>b.getAttribute('onclick').match(/'([^']+)'\)/)?.[1]).filter(Boolean);
+
+  if (!lieu)    return alert('✏️ Donne un nom au lieu.');
+  if (!adresse) return alert('📍 Rentre une adresse.');
+  if (!dateVal) return alert('📅 Choisis une date.');
+  if (!occs.length) return alert('🎯 Choisis au moins une occasion.');
+
+  const d = new Date(dateVal + 'T12:00:00');
+  const dateFormatted = d.toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
+
+  showStatus('🔍 Relocalisation en cours…','loading');
+  const geo = await geocode(lieu + ', ' + adresse + ', France');
+  if (!geo) return showStatus('❌ Impossible de localiser.','error');
+
+  await db.collection('points').doc(id).update({
+    lieu, adresse, ville: geo.ville,
+    occasion: occs.join(','),
+    lat: geo.lat, lng: geo.lng,
+    date: dateFormatted, timestamp: d.getTime()
+  });
+  closeEditModal();
+  showStatus('✅ Point modifié !','success');
+  addHistorique(`✏️ Modifié : ${lieu}`);
+  map.flyTo([geo.lat, geo.lng], 15, {animate:true, duration:1.2});
+  setTimeout(hideStatus, 3000);
+}
+
+// ── HISTORIQUE ──
+let historique = JSON.parse(localStorage.getItem('rb_historique')||'[]');
+function addHistorique(msg) {
+  const now = new Date().toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+  historique.unshift({msg, time:now});
+  if(historique.length>50) historique.pop();
+  localStorage.setItem('rb_historique', JSON.stringify(historique));
+  renderHistorique();
+}
+function renderHistorique() {
+  const el = document.getElementById('historique-list');
+  if(!el) return;
+  if(!historique.length) { el.innerHTML='<p style="color:#bcc3ce;font-size:12px;">Aucune action pour l\'instant.</p>'; return; }
+  el.innerHTML = historique.map(h=>`
+    <div style="padding:7px 0;border-bottom:1px solid #f0f4f8;font-size:12px;">
+      <span style="color:#1a1a2e;">${h.msg}</span>
+      <span style="color:#bcc3ce;float:right;font-size:11px;">${h.time}</span>
+    </div>`).join('');
+}
+function toggleHistorique() {
+  const p = document.getElementById('historique-panel');
+  p.style.display = p.style.display==='none' ? 'block' : 'none';
+  if(p.style.display==='block') renderHistorique();
+}
+function clearHistorique() {
+  if(confirm('Vider tout l\'historique ?')) {
+    historique=[];
+    localStorage.removeItem('rb_historique');
+    renderHistorique();
+  }
+}
+
+// ── RESET ──
 function resetStep1() {
   document.getElementById('reset-confirm').style.display='block';
   document.getElementById('reset-confirm2').style.display='none';
@@ -667,6 +856,7 @@ async function resetConfirmed() {
     const batch = db.batch();
     snap.docs.forEach(d => batch.delete(d.ref));
     await batch.commit();
+    addHistorique('🚨 RESET TOTAL — tous les points supprimés');
     showStatus('✅ Tous les points supprimés.', 'success');
     setTimeout(hideStatus, 3000);
   } catch(e) {
