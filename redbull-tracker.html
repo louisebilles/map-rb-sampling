@@ -319,7 +319,7 @@ input[type="text"]::placeholder { color:#bcc3ce; }
     <div class="stat-value" id="stat-last">—</div>
   </div>
   <div class="stat">
-    <div class="stat-label">Total de points</div>
+    <div class="stat-label">Total de passages</div>
     <div class="stat-value" id="stat-total">0</div>
   </div>
   <div class="stat">
@@ -572,11 +572,22 @@ async function addPoint() {
     // Cherche si ce lieu existe déjà (même nom, insensible à la casse)
     const existing = allPoints.find(p => p.lieu.toLowerCase() === lieu.toLowerCase());
     if (existing) {
-      await db.collection('points').doc(existing.id).update(point);
-      showStatus('🔄 Lieu mis à jour !', 'success');
-      addHistorique(`🔄 Mise à jour : ${lieu} (${geo.ville})`);
+      // Ajoute la nouvelle visite dans le tableau visites[]
+      const visites = existing.visites || [{date: existing.date, occasion: existing.occasion, timestamp: existing.timestamp}];
+      visites.push({date: dateFormatted, occasion: selectedOccs.join(','), timestamp: d.getTime()});
+      // Mettre à jour : dernière visite en tête, coordonnées inchangées
+      await db.collection('points').doc(existing.id).update({
+        date: dateFormatted,
+        timestamp: d.getTime(),
+        occasion: selectedOccs.join(','),
+        visites: visites
+      });
+      showStatus(`🥤 Nouvelle visite ajoutée ! (${visites.length}x sur ce spot)`, 'success');
+      addHistorique(`🥤 Nouvelle visite : ${lieu} (${visites.length}x au total)`);
       map.flyTo([point.lat, point.lng], 15, {animate:true, duration:1.2});
     } else {
+      // Nouveau lieu : initialiser visites[]
+      point.visites = [{date: dateFormatted, occasion: selectedOccs.join(','), timestamp: d.getTime()}];
       await db.collection('points').add(point);
       showStatus('🥤 Point ajouté !', 'success');
       addHistorique(`🥤 Ajout : ${lieu} (${geo.ville})`);
@@ -601,28 +612,69 @@ function showStatus(msg,type) {
 function hideStatus() { document.getElementById('status-msg').className='status-msg'; }
 
 // ── RENDU ──
+function buildPopup(p) {
+  const visites = p.visites && p.visites.length
+    ? [...p.visites].sort((a,b)=>b.timestamp-a.timestamp)
+    : [{date: p.date, occasion: p.occasion, timestamp: p.timestamp}];
+
+  const derniere = visites[0];
+  const occs = (derniere.occasion||p.occasion||'').split(',');
+
+  let visitesHtml = '';
+  if (visites.length > 1) {
+    visitesHtml = `
+      <div style="margin-top:8px;padding-top:8px;border-top:1px solid #edf0f5;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#8a94a6;margin-bottom:6px;">
+          📋 Historique des visites (${visites.length}x)
+        </div>
+        ${visites.map((v,i)=>`
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 6px;border-radius:5px;background:${i===0?'#f0f7ff':'#f7f9fc'};margin-bottom:3px;font-size:11px;">
+            <span style="color:#444;">${v.date}</span>
+            <span style="color:#888;">${(v.occasion||'').split(',').map(o=>occEmoji(o)).join('')}</span>
+          </div>`).join('')}
+      </div>`;
+  }
+
+  return `
+    <div class="popup-inner">
+      <div class="popup-lieu">${esc(p.lieu)}</div>
+      <div class="popup-ville">📍 ${esc(p.ville||p.adresse)}</div>
+      <span class="popup-occ">${occs.map(o=>occEmoji(o)+' '+o).join(' · ')}</span>
+      <div class="popup-date">🗓️ Dernière visite : ${derniere.date}</div>
+      ${visites.length > 1 ? `<div style="font-size:11px;color:#003f8a;font-weight:600;margin-top:2px;">🔁 ${visites.length} passage${visites.length>1?'s':''} sur ce spot</div>` : ''}
+      ${visitesHtml}
+      <hr class="popup-sep"/>
+      <div style="display:flex;gap:6px;">
+        <button class="popup-delete" style="flex:1;" onclick="openEditModal('${p.id}')">✏️ Modifier</button>
+        <button class="popup-delete" style="flex:1;color:#c8102e;" onclick="confirmDelete('${p.id}','${esc(p.lieu)}')">🗑️ Supprimer</button>
+      </div>
+    </div>`;
+}
+
 function renderPoints(points) {
   allPoints = points;
   Object.values(markers).forEach(m=>map.removeLayer(m));
   markers = {};
 
+  // Grouper les points par lieu pour afficher la canette la plus récente
+  const byLieu = {};
   points.forEach(p => {
-    const occs = (p.occasion||'').split(',');
+    const key = p.lieu.toLowerCase();
+    if (!byLieu[key] || (p.timestamp||0) > (byLieu[key].timestamp||0)) {
+      byLieu[key] = p;
+    }
+  });
+
+  Object.values(byLieu).forEach(p => {
+    // Couleur basée sur la dernière occasion
+    const lastOcc = p.visites && p.visites.length
+      ? [...p.visites].sort((a,b)=>b.timestamp-a.timestamp)[0].occasion
+      : p.occasion;
+    const occs = (lastOcc||'').split(',');
     const color = OCC_COLORS[occs[0]] || '#546e7a';
     const color2 = occs[1] ? (OCC_COLORS[occs[1]] || null) : null;
     const m = L.marker([p.lat,p.lng],{icon:canIcon(color, color2)}).addTo(map);
-    m.bindPopup(`
-      <div class="popup-inner">
-        <div class="popup-lieu">${esc(p.lieu)}</div>
-        <div class="popup-ville">📍 ${esc(p.ville||p.adresse)}</div>
-        <span class="popup-occ">${(p.occasion||'').split(',').map(o=>occEmoji(o)+' '+o).join(' · ')}</span>
-        <div class="popup-date">🗓️ Visité le ${p.date}</div>
-        <hr class="popup-sep"/>
-        <div style="display:flex;gap:6px;">
-          <button class="popup-delete" style="flex:1;" onclick="openEditModal('${p.id}')">✏️ Modifier</button>
-          <button class="popup-delete" style="flex:1;color:#c8102e;" onclick="confirmDelete('${p.id}','${esc(p.lieu)}')">🗑️ Supprimer</button>
-        </div>
-      </div>`);
+    m.bindPopup(buildPopup(p), {maxWidth: 280});
     markers[p.id] = m;
   });
 
@@ -640,21 +692,38 @@ function confirmDelete(id, lieu) {
 }
 
 // ── STATS ──
+function getAllVisites(points) {
+  // Aplatit toutes les visites de tous les points (pour compter correctement)
+  const all = [];
+  points.forEach(p => {
+    if (p.visites && p.visites.length) {
+      p.visites.forEach(v => all.push({...v, lieu: p.lieu, ville: p.ville}));
+    } else {
+      all.push({date: p.date, occasion: p.occasion, timestamp: p.timestamp, lieu: p.lieu, ville: p.ville});
+    }
+  });
+  return all;
+}
+
 function updateStats(points) {
-  document.getElementById('stat-total').textContent = points.length;
+  const allVisites = getAllVisites(points);
+  // Total = nombre de passages (toutes visites)
+  document.getElementById('stat-total').textContent = allVisites.length;
+
   if (!points.length) {
     ['stat-last','stat-top','stat-occ'].forEach(id=>document.getElementById(id).textContent='—');
     return;
   }
-  const sorted = [...points].sort((a,b)=>b.timestamp-a.timestamp);
-  document.getElementById('stat-last').textContent = sorted[0].lieu;
+  // Dernière visite = le passage le plus récent toutes visites confondues
+  const sortedV = [...allVisites].sort((a,b)=>(b.timestamp||0)-(a.timestamp||0));
+  document.getElementById('stat-last').textContent = sortedV[0].lieu;
 
-  // Occasion principale : mois en cours uniquement
+  // Occasion principale : mois en cours uniquement (sur toutes les visites)
   const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0,0,0,0);
-  const thisMo = points.filter(p=>(p.timestamp||0)>=monthStart.getTime());
+  const thisMo = allVisites.filter(v=>(v.timestamp||0)>=monthStart.getTime());
   if (thisMo.length) {
     const oc={};
-    thisMo.forEach(p=>{ (p.occasion||'').split(',').forEach(o=>{ oc[o]=(oc[o]||0)+1; }); });
+    thisMo.forEach(v=>{ (v.occasion||'').split(',').forEach(o=>{ oc[o]=(oc[o]||0)+1; }); });
     const total = Object.values(oc).reduce((a,b)=>a+b,0);
     const to=Object.entries(oc).sort((a,b)=>b[1]-a[1])[0];
     const pct = Math.round(to[1]/total*100);
@@ -691,7 +760,9 @@ function updateTopZones(points) {
   const period = periodSel ? periodSel.value : 'all';
   const since = getPeriodStart(period);
 
-  const filtered = since > 0 ? points.filter(p => (p.timestamp||0) >= since) : points;
+  // Compter toutes les visites (pas seulement les points uniques)
+  const allV = getAllVisites(points);
+  const filtered = since > 0 ? allV.filter(v => (v.timestamp||0) >= since) : allV;
 
   const vc={};
   filtered.forEach(p=>{ const v=p.ville||'?'; vc[v]=(vc[v]||0)+1; });
@@ -710,7 +781,7 @@ function updateTopZones(points) {
   }
   const medals=['🥇','🥈','🥉'];
   const labels = {week:'cette semaine', month:'ce mois', '3months':'3 derniers mois', all:'toutes périodes'};
-  c.innerHTML=`<div style="font-size:11px;color:#8a94a6;margin-bottom:8px;">${labels[period]} · ${filtered.length} point${filtered.length>1?'s':''}</div>`+sorted.map(([v,n],i)=>`
+  c.innerHTML=`<div style="font-size:11px;color:#8a94a6;margin-bottom:8px;">${labels[period]} · ${filtered.length} passage${filtered.length>1?'s':''}</div>`+sorted.map(([v,n],i)=>`
     <div class="zone-item" onclick="focusVille('${esc(v)}')">
       <span class="zone-rank">${medals[i]||(i+1)}</span>
       <span class="zone-name">${v}</span>
