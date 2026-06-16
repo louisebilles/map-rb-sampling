@@ -613,21 +613,43 @@ function hideStatus() { document.getElementById('status-msg').className='status-
 
 // ── RENDU ──
 // ── Groupe les points par coordonnées proches (rayon ~50m) ──
-function latLngKey(lat, lng) {
-  // Arrondi à ~50m près
-  return Math.round(lat * 1000) + ',' + Math.round(lng * 1000);
+// Calcule la distance en mètres entre deux points GPS
+function distanceM(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)*Math.sin(dLat/2) +
+            Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
+            Math.sin(dLng/2)*Math.sin(dLng/2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
 function groupByCoords(points) {
-  const groups = {};
-  points.forEach(p => {
-    const key = latLngKey(p.lat, p.lng);
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(p);
+  const RAYON_M = 200; // regroupe tout ce qui est à moins de 200m
+  const groups = []; // tableau de tableaux
+  const assigned = new Array(points.length).fill(false);
+
+  points.forEach((p, i) => {
+    if (assigned[i]) return;
+    const group = [p];
+    assigned[i] = true;
+    points.forEach((q, j) => {
+      if (i === j || assigned[j]) return;
+      if (distanceM(p.lat, p.lng, q.lat, q.lng) <= RAYON_M) {
+        group.push(q);
+        assigned[j] = true;
+      }
+    });
+    groups.push(group);
   });
+
   // Trier chaque groupe du plus récent au plus ancien
-  Object.values(groups).forEach(g => g.sort((a,b)=>(b.timestamp||0)-(a.timestamp||0)));
-  return groups;
+  groups.forEach(g => g.sort((a,b)=>(b.timestamp||0)-(a.timestamp||0)));
+
+  // Retourner un objet indexé par id du point le plus récent (pour compatibilité)
+  const result = {};
+  groups.forEach(g => { result[g[0].id] = g; });
+  return result;
 }
 
 function buildPopup(group) {
