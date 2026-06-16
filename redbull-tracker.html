@@ -689,15 +689,24 @@ function renderPoints(points) {
 
   const groups = groupByLieu(points);
 
-  Object.entries(groups).forEach(([key, group]) => {
-    const latest = group[0]; // le plus récent
-    // Couleur = occasion du point le plus récent
+  // Trier tous les groupes par timestamp décroissant pour que les récents soient au dessus
+  const sortedGroups = Object.entries(groups).sort((a,b) => {
+    const tsA = a[1][0].timestamp || 0;
+    const tsB = b[1][0].timestamp || 0;
+    return tsA - tsB; // les plus anciens ajoutés en premier = les récents par dessus
+  });
+
+  sortedGroups.forEach(([key, group], idx) => {
+    const latest = group[0]; // le plus récent du groupe
     const occs = (latest.occasion||'').split(',');
     const color = OCC_COLORS[occs[0]] || '#546e7a';
     const color2 = occs[1] ? (OCC_COLORS[occs[1]] || null) : null;
-    const m = L.marker([latest.lat, latest.lng], {icon: canIcon(color, color2)}).addTo(map);
+    // zIndexOffset plus élevé = s'affiche au dessus des autres markers
+    const m = L.marker([latest.lat, latest.lng], {
+      icon: canIcon(color, color2),
+      zIndexOffset: idx * 10
+    }).addTo(map);
     m.bindPopup(buildPopup(group), {maxWidth: 300});
-    // On associe le marker au premier point du groupe
     markers[latest.id] = m;
   });
 
