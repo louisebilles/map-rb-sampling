@@ -612,42 +612,73 @@ function showStatus(msg,type) {
 function hideStatus() { document.getElementById('status-msg').className='status-msg'; }
 
 // ── RENDU ──
-function buildPopup(p) {
-  const visites = p.visites && p.visites.length
-    ? [...p.visites].sort((a,b)=>b.timestamp-a.timestamp)
-    : [{date: p.date, occasion: p.occasion, timestamp: p.timestamp}];
+// ── Groupe tous les points Firebase par lieu (même coordonnées ou même nom) ──
+function groupByLieu(points) {
+  const groups = {}; // key = lieu.toLowerCase()
+  points.forEach(p => {
+    const key = p.lieu.toLowerCase();
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(p);
+  });
+  // Trier chaque groupe du plus récent au plus ancien
+  Object.values(groups).forEach(g => g.sort((a,b)=>(b.timestamp||0)-(a.timestamp||0)));
+  return groups;
+}
 
-  const derniere = visites[0];
-  const occs = (derniere.occasion||p.occasion||'').split(',');
+function buildPopup(group) {
+  // group = tableau trié du plus récent au plus ancien
+  const latest = group[0];
+  const lieu = latest.lieu;
+  const ville = latest.ville || latest.adresse;
 
-  let visitesHtml = '';
-  if (visites.length > 1) {
-    visitesHtml = `
+  // Couleur canette = occasion du point le plus récent
+  // (utilisé aussi par renderPoints)
+
+  // Construire l'historique : chaque entrée = un point Firebase OU une visite dans visites[]
+  const toutes = [];
+  group.forEach(p => {
+    if (p.visites && p.visites.length > 0) {
+      [...p.visites].sort((a,b)=>(b.timestamp||0)-(a.timestamp||0)).forEach(v => {
+        toutes.push({id: p.id, date: v.date, occasion: v.occasion, timestamp: v.timestamp, isVisite: true, parentId: p.id});
+      });
+    } else {
+      toutes.push({id: p.id, date: p.date, occasion: p.occasion, timestamp: p.timestamp, isVisite: false});
+    }
+  });
+  toutes.sort((a,b)=>(b.timestamp||0)-(a.timestamp||0));
+
+  const nbPassages = toutes.length;
+  const dernier = toutes[0];
+  const occs = (dernier.occasion||'').split(',');
+
+  let histoHtml = '';
+  if (nbPassages > 1) {
+    histoHtml = `
       <div style="margin-top:8px;padding-top:8px;border-top:1px solid #edf0f5;">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#8a94a6;margin-bottom:6px;">
-          📋 Historique des visites (${visites.length}x)
-        </div>
-        ${visites.map((v,i)=>`
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 6px;border-radius:5px;background:${i===0?'#f0f7ff':'#f7f9fc'};margin-bottom:3px;font-size:11px;">
-            <span style="color:#444;">${v.date}</span>
-            <span style="color:#888;">${(v.occasion||'').split(',').map(o=>occEmoji(o)).join('')}</span>
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#8a94a6;margin-bottom:6px;">📋 Historique (${nbPassages} passages)</div>
+        ${toutes.map((v,i) => `
+          <div style="padding:6px 8px;border-radius:6px;background:${i===0?'#f0f7ff':'#f7f9fc'};margin-bottom:4px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="font-size:11px;color:#333;font-weight:${i===0?'600':'400'};">${v.date}</span>
+              <span style="font-size:12px;">${(v.occasion||'').split(',').map(o=>occEmoji(o)+' '+o).join(' · ')}</span>
+            </div>
+            <div style="display:flex;gap:4px;margin-top:4px;">
+              <button class="popup-delete" style="flex:1;font-size:11px;padding:4px;" onclick="openEditModal('${v.id}')">✏️ Modifier</button>
+              <button class="popup-delete" style="flex:1;font-size:11px;padding:4px;color:#c8102e;" onclick="confirmDelete('${v.id}','${esc(lieu)}')">🗑️ Supprimer</button>
+            </div>
           </div>`).join('')}
       </div>`;
   }
 
   return `
     <div class="popup-inner">
-      <div class="popup-lieu">${esc(p.lieu)}</div>
-      <div class="popup-ville">📍 ${esc(p.ville||p.adresse)}</div>
+      <div class="popup-lieu">${esc(lieu)}</div>
+      <div class="popup-ville">📍 ${esc(ville)}</div>
       <span class="popup-occ">${occs.map(o=>occEmoji(o)+' '+o).join(' · ')}</span>
-      <div class="popup-date">🗓️ Dernière visite : ${derniere.date}</div>
-      ${visites.length > 1 ? `<div style="font-size:11px;color:#003f8a;font-weight:600;margin-top:2px;">🔁 ${visites.length} passage${visites.length>1?'s':''} sur ce spot</div>` : ''}
-      ${visitesHtml}
-      <hr class="popup-sep"/>
-      <div style="display:flex;gap:6px;">
-        <button class="popup-delete" style="flex:1;" onclick="openEditModal('${p.id}')">✏️ Modifier</button>
-        <button class="popup-delete" style="flex:1;color:#c8102e;" onclick="confirmDelete('${p.id}','${esc(p.lieu)}')">🗑️ Supprimer</button>
-      </div>
+      <div class="popup-date">🗓️ Dernière visite : ${dernier.date}</div>
+      ${nbPassages > 1 ? `<div style="font-size:11px;color:#003f8a;font-weight:600;margin-top:2px;">🔁 ${nbPassages} passage${nbPassages>1?'s':''} sur ce spot</div>` : ''}
+      ${nbPassages === 1 ? `<hr class="popup-sep"/><div style="display:flex;gap:6px;"><button class="popup-delete" style="flex:1;" onclick="openEditModal('${toutes[0].id}')">✏️ Modifier</button><button class="popup-delete" style="flex:1;color:#c8102e;" onclick="confirmDelete('${toutes[0].id}','${esc(lieu)}')">🗑️ Supprimer</button></div>` : ''}
+      ${histoHtml}
     </div>`;
 }
 
@@ -656,26 +687,18 @@ function renderPoints(points) {
   Object.values(markers).forEach(m=>map.removeLayer(m));
   markers = {};
 
-  // Grouper les points par lieu pour afficher la canette la plus récente
-  const byLieu = {};
-  points.forEach(p => {
-    const key = p.lieu.toLowerCase();
-    if (!byLieu[key] || (p.timestamp||0) > (byLieu[key].timestamp||0)) {
-      byLieu[key] = p;
-    }
-  });
+  const groups = groupByLieu(points);
 
-  Object.values(byLieu).forEach(p => {
-    // Couleur basée sur la dernière occasion
-    const lastOcc = p.visites && p.visites.length
-      ? [...p.visites].sort((a,b)=>b.timestamp-a.timestamp)[0].occasion
-      : p.occasion;
-    const occs = (lastOcc||'').split(',');
+  Object.entries(groups).forEach(([key, group]) => {
+    const latest = group[0]; // le plus récent
+    // Couleur = occasion du point le plus récent
+    const occs = (latest.occasion||'').split(',');
     const color = OCC_COLORS[occs[0]] || '#546e7a';
     const color2 = occs[1] ? (OCC_COLORS[occs[1]] || null) : null;
-    const m = L.marker([p.lat,p.lng],{icon:canIcon(color, color2)}).addTo(map);
-    m.bindPopup(buildPopup(p), {maxWidth: 280});
-    markers[p.id] = m;
+    const m = L.marker([latest.lat, latest.lng], {icon: canIcon(color, color2)}).addTo(map);
+    m.bindPopup(buildPopup(group), {maxWidth: 300});
+    // On associe le marker au premier point du groupe
+    markers[latest.id] = m;
   });
 
   updateStats(points);
