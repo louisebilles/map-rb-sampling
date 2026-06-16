@@ -612,11 +612,16 @@ function showStatus(msg,type) {
 function hideStatus() { document.getElementById('status-msg').className='status-msg'; }
 
 // ── RENDU ──
-// ── Groupe tous les points Firebase par lieu (même coordonnées ou même nom) ──
-function groupByLieu(points) {
-  const groups = {}; // key = lieu.toLowerCase()
+// ── Groupe les points par coordonnées proches (rayon ~50m) ──
+function latLngKey(lat, lng) {
+  // Arrondi à ~50m près
+  return Math.round(lat * 1000) + ',' + Math.round(lng * 1000);
+}
+
+function groupByCoords(points) {
+  const groups = {};
   points.forEach(p => {
-    const key = p.lieu.toLowerCase();
+    const key = latLngKey(p.lat, p.lng);
     if (!groups[key]) groups[key] = [];
     groups[key].push(p);
   });
@@ -639,10 +644,10 @@ function buildPopup(group) {
   group.forEach(p => {
     if (p.visites && p.visites.length > 0) {
       [...p.visites].sort((a,b)=>(b.timestamp||0)-(a.timestamp||0)).forEach(v => {
-        toutes.push({id: p.id, date: v.date, occasion: v.occasion, timestamp: v.timestamp, isVisite: true, parentId: p.id});
+        toutes.push({id: p.id, lieu: p.lieu, date: v.date, occasion: v.occasion, timestamp: v.timestamp, isVisite: true, parentId: p.id});
       });
     } else {
-      toutes.push({id: p.id, date: p.date, occasion: p.occasion, timestamp: p.timestamp, isVisite: false});
+      toutes.push({id: p.id, lieu: p.lieu, date: p.date, occasion: p.occasion, timestamp: p.timestamp, isVisite: false});
     }
   });
   toutes.sort((a,b)=>(b.timestamp||0)-(a.timestamp||0));
@@ -658,21 +663,28 @@ function buildPopup(group) {
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#8a94a6;margin-bottom:6px;">📋 Historique (${nbPassages} passages)</div>
         ${toutes.map((v,i) => `
           <div style="padding:6px 8px;border-radius:6px;background:${i===0?'#f0f7ff':'#f7f9fc'};margin-bottom:4px;">
+            <div style="font-size:12px;font-weight:600;color:#1a1a2e;margin-bottom:2px;">${esc(v.lieu||lieu)}</div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span style="font-size:11px;color:#333;font-weight:${i===0?'600':'400'};">${v.date}</span>
+              <span style="font-size:11px;color:#555;">${v.date}</span>
               <span style="font-size:12px;">${(v.occasion||'').split(',').map(o=>occEmoji(o)+' '+o).join(' · ')}</span>
             </div>
             <div style="display:flex;gap:4px;margin-top:4px;">
               <button class="popup-delete" style="flex:1;font-size:11px;padding:4px;" onclick="openEditModal('${v.id}')">✏️ Modifier</button>
-              <button class="popup-delete" style="flex:1;font-size:11px;padding:4px;color:#c8102e;" onclick="confirmDelete('${v.id}','${esc(lieu)}')">🗑️ Supprimer</button>
+              <button class="popup-delete" style="flex:1;font-size:11px;padding:4px;color:#c8102e;" onclick="confirmDelete('${v.id}','${esc(v.lieu||lieu)}')">🗑️ Supprimer</button>
             </div>
           </div>`).join('')}
       </div>`;
   }
 
+  // Si le groupe contient plusieurs noms de lieux différents, l'afficher
+  const nomsUniques = [...new Set(group.map(p=>p.lieu))];
+  const titrePopup = nomsUniques.length > 1
+    ? `${nomsUniques.length} spots`
+    : esc(lieu);
+
   return `
     <div class="popup-inner">
-      <div class="popup-lieu">${esc(lieu)}</div>
+      <div class="popup-lieu">${titrePopup}</div>
       <div class="popup-ville">📍 ${esc(ville)}</div>
       <span class="popup-occ">${occs.map(o=>occEmoji(o)+' '+o).join(' · ')}</span>
       <div class="popup-date">🗓️ Dernière visite : ${dernier.date}</div>
@@ -687,7 +699,7 @@ function renderPoints(points) {
   Object.values(markers).forEach(m=>map.removeLayer(m));
   markers = {};
 
-  const groups = groupByLieu(points);
+  const groups = groupByCoords(points);
 
   // Trier tous les groupes par timestamp décroissant pour que les récents soient au dessus
   const sortedGroups = Object.entries(groups).sort((a,b) => {
