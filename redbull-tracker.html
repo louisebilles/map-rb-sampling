@@ -612,107 +612,42 @@ function showStatus(msg,type) {
 function hideStatus() { document.getElementById('status-msg').className='status-msg'; }
 
 // ── RENDU ──
-// ── Groupe les points par coordonnées proches (rayon ~50m) ──
-// Calcule la distance en mètres entre deux points GPS
-function distanceM(lat1, lng1, lat2, lng2) {
-  const R = 6371000;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a = Math.sin(dLat/2)*Math.sin(dLat/2) +
-            Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
-            Math.sin(dLng/2)*Math.sin(dLng/2);
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-}
+function buildPopup(p) {
+  const visites = p.visites && p.visites.length
+    ? [...p.visites].sort((a,b)=>b.timestamp-a.timestamp)
+    : [{date: p.date, occasion: p.occasion, timestamp: p.timestamp}];
 
-function groupByCoords(points) {
-  const RAYON_M = 200; // regroupe tout ce qui est à moins de 200m
-  const groups = []; // tableau de tableaux
-  const assigned = new Array(points.length).fill(false);
+  const derniere = visites[0];
+  const occs = (derniere.occasion||p.occasion||'').split(',');
 
-  points.forEach((p, i) => {
-    if (assigned[i]) return;
-    const group = [p];
-    assigned[i] = true;
-    points.forEach((q, j) => {
-      if (i === j || assigned[j]) return;
-      if (distanceM(p.lat, p.lng, q.lat, q.lng) <= RAYON_M) {
-        group.push(q);
-        assigned[j] = true;
-      }
-    });
-    groups.push(group);
-  });
-
-  // Trier chaque groupe du plus récent au plus ancien
-  groups.forEach(g => g.sort((a,b)=>(b.timestamp||0)-(a.timestamp||0)));
-
-  // Retourner un objet indexé par id du point le plus récent (pour compatibilité)
-  const result = {};
-  groups.forEach(g => { result[g[0].id] = g; });
-  return result;
-}
-
-function buildPopup(group) {
-  // group = tableau trié du plus récent au plus ancien
-  const latest = group[0];
-  const lieu = latest.lieu;
-  const ville = latest.ville || latest.adresse;
-
-  // Couleur canette = occasion du point le plus récent
-  // (utilisé aussi par renderPoints)
-
-  // Construire l'historique : chaque entrée = un point Firebase OU une visite dans visites[]
-  const toutes = [];
-  group.forEach(p => {
-    if (p.visites && p.visites.length > 0) {
-      [...p.visites].sort((a,b)=>(b.timestamp||0)-(a.timestamp||0)).forEach(v => {
-        toutes.push({id: p.id, lieu: p.lieu, date: v.date, occasion: v.occasion, timestamp: v.timestamp, isVisite: true, parentId: p.id});
-      });
-    } else {
-      toutes.push({id: p.id, lieu: p.lieu, date: p.date, occasion: p.occasion, timestamp: p.timestamp, isVisite: false});
-    }
-  });
-  toutes.sort((a,b)=>(b.timestamp||0)-(a.timestamp||0));
-
-  const nbPassages = toutes.length;
-  const dernier = toutes[0];
-  const occs = (dernier.occasion||'').split(',');
-
-  let histoHtml = '';
-  if (nbPassages > 1) {
-    histoHtml = `
+  let visitesHtml = '';
+  if (visites.length > 1) {
+    visitesHtml = `
       <div style="margin-top:8px;padding-top:8px;border-top:1px solid #edf0f5;">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#8a94a6;margin-bottom:6px;">📋 Historique (${nbPassages} passages)</div>
-        ${toutes.map((v,i) => `
-          <div style="padding:6px 8px;border-radius:6px;background:${i===0?'#f0f7ff':'#f7f9fc'};margin-bottom:4px;">
-            <div style="font-size:12px;font-weight:600;color:#1a1a2e;margin-bottom:2px;">${esc(v.lieu||lieu)}</div>
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span style="font-size:11px;color:#555;">${v.date}</span>
-              <span style="font-size:12px;">${(v.occasion||'').split(',').map(o=>occEmoji(o)+' '+o).join(' · ')}</span>
-            </div>
-            <div style="display:flex;gap:4px;margin-top:4px;">
-              <button class="popup-delete" style="flex:1;font-size:11px;padding:4px;" onclick="openEditModal('${v.id}')">✏️ Modifier</button>
-              <button class="popup-delete" style="flex:1;font-size:11px;padding:4px;color:#c8102e;" onclick="confirmDelete('${v.id}','${esc(v.lieu||lieu)}')">🗑️ Supprimer</button>
-            </div>
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#8a94a6;margin-bottom:6px;">
+          📋 Historique des visites (${visites.length}x)
+        </div>
+        ${visites.map((v,i)=>`
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 6px;border-radius:5px;background:${i===0?'#f0f7ff':'#f7f9fc'};margin-bottom:3px;font-size:11px;">
+            <span style="color:#444;">${v.date}</span>
+            <span style="color:#888;">${(v.occasion||'').split(',').map(o=>occEmoji(o)).join('')}</span>
           </div>`).join('')}
       </div>`;
   }
 
-  // Si le groupe contient plusieurs noms de lieux différents, l'afficher
-  const nomsUniques = [...new Set(group.map(p=>p.lieu))];
-  const titrePopup = nomsUniques.length > 1
-    ? `${nomsUniques.length} spots`
-    : esc(lieu);
-
   return `
     <div class="popup-inner">
-      <div class="popup-lieu">${titrePopup}</div>
-      <div class="popup-ville">📍 ${esc(ville)}</div>
+      <div class="popup-lieu">${esc(p.lieu)}</div>
+      <div class="popup-ville">📍 ${esc(p.ville||p.adresse)}</div>
       <span class="popup-occ">${occs.map(o=>occEmoji(o)+' '+o).join(' · ')}</span>
-      <div class="popup-date">🗓️ Dernière visite : ${dernier.date}</div>
-      ${nbPassages > 1 ? `<div style="font-size:11px;color:#003f8a;font-weight:600;margin-top:2px;">🔁 ${nbPassages} passage${nbPassages>1?'s':''} sur ce spot</div>` : ''}
-      ${nbPassages === 1 ? `<hr class="popup-sep"/><div style="display:flex;gap:6px;"><button class="popup-delete" style="flex:1;" onclick="openEditModal('${toutes[0].id}')">✏️ Modifier</button><button class="popup-delete" style="flex:1;color:#c8102e;" onclick="confirmDelete('${toutes[0].id}','${esc(lieu)}')">🗑️ Supprimer</button></div>` : ''}
-      ${histoHtml}
+      <div class="popup-date">🗓️ Dernière visite : ${derniere.date}</div>
+      ${visites.length > 1 ? `<div style="font-size:11px;color:#003f8a;font-weight:600;margin-top:2px;">🔁 ${visites.length} passage${visites.length>1?'s':''} sur ce spot</div>` : ''}
+      ${visitesHtml}
+      <hr class="popup-sep"/>
+      <div style="display:flex;gap:6px;">
+        <button class="popup-delete" style="flex:1;" onclick="openEditModal('${p.id}')">✏️ Modifier</button>
+        <button class="popup-delete" style="flex:1;color:#c8102e;" onclick="confirmDelete('${p.id}','${esc(p.lieu)}')">🗑️ Supprimer</button>
+      </div>
     </div>`;
 }
 
@@ -721,27 +656,30 @@ function renderPoints(points) {
   Object.values(markers).forEach(m=>map.removeLayer(m));
   markers = {};
 
-  const groups = groupByCoords(points);
-
-  // Trier tous les groupes par timestamp décroissant pour que les récents soient au dessus
-  const sortedGroups = Object.entries(groups).sort((a,b) => {
-    const tsA = a[1][0].timestamp || 0;
-    const tsB = b[1][0].timestamp || 0;
-    return tsA - tsB; // les plus anciens ajoutés en premier = les récents par dessus
+  // Un seul marker par NOM DE LIEU exact (pas par distance)
+  // On garde le point qui a le timestamp le plus récent
+  const byLieu = {};
+  points.forEach(p => {
+    const key = p.lieu.toLowerCase().trim();
+    if (!byLieu[key] || (p.timestamp||0) > (byLieu[key].timestamp||0)) {
+      byLieu[key] = p;
+    }
   });
 
-  sortedGroups.forEach(([key, group], idx) => {
-    const latest = group[0]; // le plus récent du groupe
-    const occs = (latest.occasion||'').split(',');
+  // Trier par timestamp croissant pour que les plus récents s'affichent par dessus
+  const sortedEntries = Object.values(byLieu).sort((a,b) => (a.timestamp||0) - (b.timestamp||0));
+
+  sortedEntries.forEach((p, idx) => {
+    // Couleur basée sur la dernière occasion (la plus récente visite)
+    const lastOcc = p.visites && p.visites.length
+      ? [...p.visites].sort((a,b)=>(b.timestamp||0)-(a.timestamp||0))[0].occasion
+      : p.occasion;
+    const occs = (lastOcc||'').split(',');
     const color = OCC_COLORS[occs[0]] || '#546e7a';
     const color2 = occs[1] ? (OCC_COLORS[occs[1]] || null) : null;
-    // zIndexOffset plus élevé = s'affiche au dessus des autres markers
-    const m = L.marker([latest.lat, latest.lng], {
-      icon: canIcon(color, color2),
-      zIndexOffset: idx * 10
-    }).addTo(map);
-    m.bindPopup(buildPopup(group), {maxWidth: 300});
-    markers[latest.id] = m;
+    const m = L.marker([p.lat,p.lng],{icon:canIcon(color, color2), zIndexOffset: idx*10}).addTo(map);
+    m.bindPopup(buildPopup(p), {maxWidth: 280});
+    markers[p.id] = m;
   });
 
   updateStats(points);
