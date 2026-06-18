@@ -872,12 +872,32 @@ async function saveEdit() {
   const geo = await geocode(lieu + ', ' + adresse + ', France');
   if (!geo) return showStatus('❌ Impossible de localiser.','error');
 
-  await db.collection('points').doc(id).update({
+  // Mettre aussi à jour la visite correspondante dans visites[] si elle existe,
+  // pour que la couleur du marker (basée sur la dernière visite) reflète le changement
+  const pointActuel = allPoints.find(x => x.id === id);
+  let visitesUpdated = pointActuel && pointActuel.visites ? [...pointActuel.visites] : null;
+  if (visitesUpdated && visitesUpdated.length) {
+    // Trouver la visite correspondant à l'ancien timestamp et la mettre à jour
+    const oldTimestamp = pointActuel.timestamp;
+    const idx = visitesUpdated.findIndex(v => v.timestamp === oldTimestamp);
+    if (idx !== -1) {
+      visitesUpdated[idx] = { date: dateFormatted, occasion: occs.join(','), timestamp: d.getTime() };
+    } else {
+      // Sécurité : si on ne retrouve pas l'entrée, on met à jour la plus récente
+      visitesUpdated.sort((a,b)=>(b.timestamp||0)-(a.timestamp||0));
+      visitesUpdated[0] = { date: dateFormatted, occasion: occs.join(','), timestamp: d.getTime() };
+    }
+  }
+
+  const updateData = {
     lieu, adresse, ville: geo.ville,
     occasion: occs.join(','),
     lat: geo.lat, lng: geo.lng,
     date: dateFormatted, timestamp: d.getTime()
-  });
+  };
+  if (visitesUpdated) updateData.visites = visitesUpdated;
+
+  await db.collection('points').doc(id).update(updateData);
   closeEditModal();
   showStatus('✅ Point modifié !','success');
   addHistorique(`✏️ Modifié : ${lieu}`);
