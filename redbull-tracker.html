@@ -295,6 +295,7 @@ input[type="text"]::placeholder { color:#bcc3ce; }
       <div class="sync-dot"></div>
       <span class="sync-label">Synchronisé</span>
     </div>
+    <button onclick="exportCSV()" title="Exporter en CSV" style="background:rgba(255,255,255,0.15);border:none;color:white;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;">📤 Exporter</button>
     <button onclick="toggleHistorique()" title="Historique des ajouts" style="background:rgba(255,255,255,0.15);border:none;color:white;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;">📋 Historique</button>
   </div>
 </header>
@@ -348,7 +349,7 @@ input[type="text"]::placeholder { color:#bcc3ce; }
       <div style="border-top:2px solid #003f8a;margin:14px 0 14px;"></div>
 
       <h3>➕ Ajouter un nouveau lieu</h3>
-      <div class="field-hint" style="margin-bottom:10px;">Remplis les champs ci-dessous pour ajouter un endroit où la team a sampé</div>
+      <div class="field-hint" style="margin-bottom:10px;">Remplis les champs ci-dessous pour ajouter un endroit où la team a samplé</div>
 
       <div class="field-label">Nom du lieu</div>
       <div class="field-hint">Ex : Fitness Park, Vieux-Marché, Neoma BS…</div>
@@ -359,7 +360,7 @@ input[type="text"]::placeholder { color:#bcc3ce; }
       <input type="text" id="input-adresse" placeholder="Place Saint-Marc, Rouen"/>
 
       <div class="field-label">Date de la visite</div>
-      <div class="field-hint">Quand avez-vous sampé ici ?</div>
+      <div class="field-hint">Quand avez-vous samplé ici ?</div>
       <input type="date" id="input-date" style="width:100%;background:#f7f9fc;border:1.5px solid #dde3ec;color:#1a1a2e;padding:9px 11px;border-radius:7px;font-size:13px;outline:none;margin-bottom:10px;"/>
 
       <div class="field-label" style="margin-bottom:8px;">Occasion de conso</div>
@@ -570,7 +571,16 @@ async function addPoint() {
 
   try {
     // Cherche si ce lieu existe déjà (même nom, insensible à la casse)
-    const existing = allPoints.find(p => p.lieu.toLowerCase() === lieu.toLowerCase());
+    // Même lieu = même nom ET coordonnées très proches (sinon ce sont 2 endroits différents)
+    const distM = (lat1,lng1,lat2,lng2) => {
+      const R=6371000, dLat=(lat2-lat1)*Math.PI/180, dLng=(lng2-lng1)*Math.PI/180;
+      const a=Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+      return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+    };
+    const existing = allPoints.find(p =>
+      p.lieu.toLowerCase() === lieu.toLowerCase() &&
+      distM(p.lat, p.lng, geo.lat, geo.lng) < 100
+    );
     if (existing) {
       // Ajoute la nouvelle visite dans le tableau visites[]
       const visites = existing.visites || [{date: existing.date, occasion: existing.occasion, timestamp: existing.timestamp}];
@@ -614,7 +624,7 @@ function hideStatus() { document.getElementById('status-msg').className='status-
 // ── RENDU ──
 function buildPopup(p) {
   const visites = p.visites && p.visites.length
-    ? [...p.visites].sort((a,b)=>b.timestamp-a.timestamp)
+    ? [...p.visites].sort((a,b)=>(b.timestamp||0)-(a.timestamp||0))
     : [{date: p.date, occasion: p.occasion, timestamp: p.timestamp}];
 
   const derniere = visites[0];
@@ -656,18 +666,32 @@ function renderPoints(points) {
   Object.values(markers).forEach(m=>map.removeLayer(m));
   markers = {};
 
-  // Un seul marker par NOM DE LIEU exact (pas par distance)
-  // On garde le point qui a le timestamp le plus récent
-  const byLieu = {};
-  points.forEach(p => {
-    const key = p.lieu.toLowerCase().trim();
-    if (!byLieu[key] || (p.timestamp||0) > (byLieu[key].timestamp||0)) {
-      byLieu[key] = p;
-    }
+  // Chaque point Firebase = un marker, SAUF si même nom ET coordonnées proches (<100m)
+  // (cas où le même lieu a été ré-ajouté avec une nouvelle visite -> fusion dans visites[])
+  const distMm = (lat1,lng1,lat2,lng2) => {
+    const R=6371000, dLat=(lat2-lat1)*Math.PI/180, dLng=(lng2-lng1)*Math.PI/180;
+    const a=Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+    return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+  };
+
+  const used = new Array(points.length).fill(false);
+  const finalPoints = [];
+  points.forEach((p, i) => {
+    if (used[i]) return;
+    let best = p;
+    used[i] = true;
+    points.forEach((q, j) => {
+      if (i===j || used[j]) return;
+      if (q.lieu.toLowerCase().trim() === p.lieu.toLowerCase().trim() && distMm(p.lat,p.lng,q.lat,q.lng) < 100) {
+        if ((q.timestamp||0) > (best.timestamp||0)) best = q;
+        used[j] = true;
+      }
+    });
+    finalPoints.push(best);
   });
 
   // Trier par timestamp croissant pour que les plus récents s'affichent par dessus
-  const sortedEntries = Object.values(byLieu).sort((a,b) => (a.timestamp||0) - (b.timestamp||0));
+  const sortedEntries = finalPoints.sort((a,b) => (a.timestamp||0) - (b.timestamp||0));
 
   sortedEntries.forEach((p, idx) => {
     // Couleur basée sur la dernière occasion (la plus récente visite)
@@ -794,8 +818,18 @@ function updateTopZones(points) {
 }
 
 function focusVille(ville) {
-  const p=allPoints.find(x=>(x.ville||'')=== ville);
-  if(p){map.setView([p.lat,p.lng],13); markers[p.id]?.openPopup();}
+  // Prendre le point dont la VISITE LA PLUS RÉCENTE est la plus récente (pas juste le premier trouvé)
+  const candidats = allPoints.filter(x => (x.ville||'') === ville);
+  if (!candidats.length) return;
+  const getMaxTs = (p) => {
+    if (p.visites && p.visites.length) {
+      return Math.max(...p.visites.map(v => v.timestamp || 0));
+    }
+    return p.timestamp || 0;
+  };
+  const p = candidats.reduce((max, curr) => getMaxTs(curr) > getMaxTs(max) ? curr : max, candidats[0]);
+  map.setView([p.lat, p.lng], 13);
+  markers[p.id]?.openPopup();
 }
 
 // ── RECHERCHE ──
@@ -924,6 +958,47 @@ function renderHistorique() {
       <span style="color:#bcc3ce;float:right;font-size:11px;">${h.time}</span>
     </div>`).join('');
 }
+function exportCSV() {
+  if (!allPoints.length) { showStatus('Aucun point à exporter', 'error'); setTimeout(hideStatus, 2000); return; }
+
+  const headers = ['Lieu','Ville','Adresse','Occasion','Date','Latitude','Longitude'];
+  const rows = [headers];
+
+  allPoints.forEach(p => {
+    // Si visites[] existe, exporter chaque visite comme une ligne séparée
+    if (p.visites && p.visites.length) {
+      p.visites.forEach(v => {
+        rows.push([p.lieu, p.ville||'', p.adresse||'', v.occasion||'', v.date||'', p.lat, p.lng]);
+      });
+    } else {
+      rows.push([p.lieu, p.ville||'', p.adresse||'', p.occasion||'', p.date||'', p.lat, p.lng]);
+    }
+  });
+
+  const csvContent = rows.map(row =>
+    row.map(cell => {
+      const s = String(cell ?? '');
+      return s.includes(',') || s.includes('"') || s.includes('\n')
+        ? '"' + s.replace(/"/g,'""') + '"'
+        : s;
+    }).join(',')
+  ).join('\n');
+
+  const blob = new Blob(['\ufeff' + csvContent], {type: 'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const today = new Date().toISOString().slice(0,10);
+  a.href = url;
+  a.download = `redbull-tracker-export-${today}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  showStatus('📤 Export téléchargé !', 'success');
+  setTimeout(hideStatus, 2500);
+}
+
 function toggleHistorique() {
   const p = document.getElementById('historique-panel');
   p.style.display = p.style.display==='none' ? 'block' : 'none';
